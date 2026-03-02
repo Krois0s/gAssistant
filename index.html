@@ -110,9 +110,26 @@
             border-bottom: 1px solid var(--border-color);
             display: flex;
             justify-content: space-between;
+            align-items: center;
             color: #8b949e;
             font-size: 0.8rem;
             flex-shrink: 0;
+        }
+
+        #reset-btn {
+            background: rgba(248, 81, 73, 0.1);
+            color: #f85149;
+            border: 1px solid rgba(248, 81, 73, 0.4);
+            padding: 2px 8px;
+            cursor: pointer;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            border-radius: 3px;
+        }
+
+        #reset-btn:hover {
+            background: rgba(248, 81, 73, 0.2);
+            border-color: #f85149;
         }
 
         #log-output {
@@ -259,6 +276,7 @@
     <main id="main-console" class="hidden">
         <header>
             <span>CONSOLE v3.1.0-preview</span>
+            <button id="reset-btn">[RESET HISTORY]</button>
             <span id="header-model">Target: -</span>
             <span id="status">STATUS: ONLINE</span>
         </header>
@@ -295,6 +313,7 @@
         const logOutput = document.getElementById('log-output');
         const cmdInput = document.getElementById('cmd-input');
         const hdrModel = document.getElementById('header-model');
+        const resetBtn = document.getElementById('reset-btn');
 
         startBtn.addEventListener('click', async () => {
             const key = apiKeyInput.value.trim();
@@ -401,6 +420,22 @@
                 logEntry.style.color = '#f85149';
             }
         }
+
+        resetBtn.addEventListener('click', () => {
+            if (!confirm('Clear all conversation history and reset session?')) return;
+
+            // Reset UI
+            logOutput.innerHTML = `<div class="log-entry"><span class="log-time">[${getTime()}]</span><span class="log-sys">[SYSTEM]</span> Kernel reset. History purged.</div>`;
+
+            // Reset SDK Session
+            const useGrounding = groundingToggle.checked;
+            const modelConfig = { model: currentModelName };
+            if (useGrounding) {
+                modelConfig.tools = [{ googleSearch: {} }];
+            }
+            model = genAI.getGenerativeModel(modelConfig);
+            chatSession = model.startChat({ history: [] });
+        });
 
         function appendLog(role, text) {
             const entry = document.createElement('div');
