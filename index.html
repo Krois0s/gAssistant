@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Diagnostic Console</title>
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --text-color: #c9d1d9;
+            --accent-color: #58a6ff;
+            --user-color: #7ee787;
+            --border-color: #30363d;
+            --font-mono: 'Consolas', 'Monaco', 'Courier New', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: var(--font-mono);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            font-size: 14px;
+        }
+
+        /* Overlay / Auth */
+        #setup-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .auth-box {
+            border: 1px solid var(--border-color);
+            padding: 2rem;
+            width: 400px;
+        }
+
+        .auth-box h2 {
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            color: var(--accent-color);
+        }
+
+        .input-line {
+            display: flex;
+            margin-bottom: 1rem;
+        }
+
+        .prompt {
+            color: var(--accent-color);
+            margin-right: 0.5rem;
+        }
+
+        input[type="password"],
+        select {
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-color);
+            font-family: var(--font-mono);
+            width: 100%;
+            outline: none;
+        }
+
+        /* Set dropdown options to black text on white background for visibility */
+        select option {
+            background-color: #ffffff;
+            color: #000000;
+        }
+
+        button.cmd-btn {
+            background: transparent;
+            color: var(--accent-color);
+            border: 1px solid var(--accent-color);
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            font-family: var(--font-mono);
+        }
+
+        button.cmd-btn:hover {
+            background: rgba(88, 166, 255, 0.1);
+        }
+
+        /* Console Layout */
+        header {
+            padding: 0.5rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            color: #8b949e;
+            font-size: 0.8rem;
+        }
+
+        #log-output {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .log-entry {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .log-time {
+            color: #8b949e;
+            margin-right: 0.5rem;
+        }
+
+        .log-user {
+            color: var(--user-color);
+            font-weight: bold;
+        }
+
+        .log-sys {
+            color: var(--accent-color);
+            font-weight: bold;
+        }
+
+        footer {
+            padding: 1rem;
+            border-top: 1px solid var(--border-color);
+            background: #161b22;
+        }
+
+        .cmd-line {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        #cmd-input {
+            background: transparent;
+            border: none;
+            color: var(--text-color);
+            font-family: var(--font-mono);
+            flex-grow: 1;
+            outline: none;
+            resize: none;
+            height: 20px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .cursor {
+            display: inline-block;
+            width: 8px;
+            height: 15px;
+            background: var(--text-color);
+            animation: blink 1s step-end infinite;
+            vertical-align: middle;
+        }
+
+        @keyframes blink {
+            50% {
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Stealth Auth Overlay -->
+    <div id="setup-overlay">
+        <div class="auth-box">
+            <h2>> SYSTEM CONFIGURATION</h2>
+            <div class="input-line">
+                <span class="prompt">SET API_KEY=</span>
+                <input type="password" id="api-key" placeholder="Enter key...">
+            </div>
+            <div class="input-line">
+                <span class="prompt">SET TARGET_MODEL=</span>
+                <select id="model-select">
+                    <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
+                    <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
+                    <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                    <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                </select>
+            </div>
+            <button id="start-btn" class="cmd-btn">EXECUTE BOOT SEQUENCE</button>
+        </div>
+    </div>
+
+    <!-- Terminal Interface -->
+    <main id="main-console" class="hidden">
+        <header>
+            <span>CONSOLE v3.1.0-preview</span>
+            <span id="header-model">Target: -</span>
+            <span id="status">STATUS: ONLINE</span>
+        </header>
+
+        <section id="log-output">
+            <div class="log-entry"><span class="log-time">[20:00:00]</span><span class="log-sys">[SYSTEM]</span> Kernel
+                loaded. Awaiting input...</div>
+        </section>
+
+        <footer>
+            <div class="cmd-line">
+                <span class="prompt">></span>
+                <textarea id="cmd-input" placeholder="Input command..."></textarea>
+            </div>
+        </footer>
+    </main>
+
+    <script type="module">
+        import { GoogleGenerativeAI } from "https://esm.run/@google/generative-ai";
+
+        let genAI, model, chatSession;
+
+        const setupOverlay = document.getElementById('setup-overlay');
+        const mainConsole = document.getElementById('main-console');
+        const apiKeyInput = document.getElementById('api-key');
+        const modelSelect = document.getElementById('model-select');
+        const startBtn = document.getElementById('start-btn');
+        const logOutput = document.getElementById('log-output');
+        const cmdInput = document.getElementById('cmd-input');
+        const hdrModel = document.getElementById('header-model');
+
+        startBtn.addEventListener('click', async () => {
+            const key = apiKeyInput.value.trim();
+            if (!key) return alert('API_KEY is required.');
+
+            const selModel = modelSelect.value;
+            try {
+                genAI = new GoogleGenerativeAI(key);
+                model = genAI.getGenerativeModel({ model: selModel });
+
+                // Boot verification
+                const res = await model.generateContent("ping");
+                if (res) {
+                    chatSession = model.startChat({ history: [] });
+                    setupOverlay.classList.add('hidden');
+                    mainConsole.classList.remove('hidden');
+                    hdrModel.textContent = `Target: ${selModel}`;
+                    apiKeyInput.value = '';
+                }
+            } catch (e) {
+                alert('BOOT FAILED: ' + e.message);
+            }
+        });
+
+        async function execCommand() {
+            const text = cmdInput.value.trim();
+            if (!text || !chatSession) return;
+
+            appendLog('user', text);
+            cmdInput.value = '';
+            cmdInput.style.height = '20px';
+
+            const logEntry = appendLog('sys', '');
+
+            try {
+                const result = await chatSession.sendMessageStream(text);
+                let full = '';
+                for await (const chunk of result.stream) {
+                    full += chunk.text();
+                    logEntry.textContent = `[${getTime()}] [OUTPUT] ${full}`;
+                    logOutput.scrollTop = logOutput.scrollHeight;
+                }
+            } catch (e) {
+                logEntry.textContent = `[ERROR] ${e.message}`;
+                logEntry.style.color = '#f85149';
+            }
+        }
+
+        function appendLog(role, text) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            const time = getTime();
+            if (role === 'user') {
+                entry.innerHTML = `<span class="log-time">[${time}]</span><span class="log-user">[INPUT]</span> ${text}`;
+            } else {
+                entry.innerHTML = `<span class="log-time">[${time}]</span><span class="log-sys">[OUTPUT]</span> ${text}`;
+            }
+            logOutput.appendChild(entry);
+            logOutput.scrollTop = logOutput.scrollHeight;
+            return entry.lastChild; // Returns the text node for streaming
+        }
+
+        function getTime() {
+            return new Date().toLocaleTimeString('ja-JP', { hour12: false });
+        }
+
+        cmdInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                execCommand();
+            }
+        });
+
+        cmdInput.addEventListener('input', () => {
+            cmdInput.style.height = 'auto';
+            cmdInput.style.height = Math.min(cmdInput.scrollHeight, 200) + 'px';
+        });
+    </script>
+</body>
+
+</html>
