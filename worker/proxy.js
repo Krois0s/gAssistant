@@ -12,11 +12,13 @@ const GEMINI_BASE = "https://generativelanguage.googleapis.com";
 
 export default {
   async fetch(request, env, ctx) {
+    const cors = corsHeaders();
+
     // CORSプリフライト対応
     if (request.method === "OPTIONS") {
       return new Response(null, {
         status: 204,
-        headers: corsHeaders(),
+        headers: cors,
       });
     }
 
@@ -27,7 +29,11 @@ export default {
     //  → https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
     const pathMatch = url.pathname.match(/^\/v1\/(.*)/);
     if (!pathMatch) {
-      return new Response("Not Found", { status: 404 });
+      // パスが違う場合もCORSヘッダーを付けて404を返す（デバッグしやすくするため）
+      return new Response(`Not Found. Current path is ${url.pathname}, but expected starting with /v1/`, {
+        status: 404,
+        headers: cors
+      });
     }
 
     const targetPath = pathMatch[1];
@@ -50,7 +56,7 @@ export default {
         statusText: response.statusText,
         headers: {
           ...Object.fromEntries(response.headers),
-          ...corsHeaders(),
+          ...cors,
         },
       });
 
@@ -58,7 +64,7 @@ export default {
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), {
         status: 502,
-        headers: { "Content-Type": "application/json", ...corsHeaders() },
+        headers: { "Content-Type": "application/json", ...cors },
       });
     }
   },
