@@ -22,10 +22,10 @@ export default {
 
     const url = new URL(request.url);
 
-    // /proxy/* のパスを Gemini API にフォワード
-    // 例: /proxy/v1beta/models/gemini-2.5-flash:generateContent
+    // /v1/* のパスを Gemini API にフォワード
+    // 例: /v1/v1beta/models/gemini-2.5-flash:generateContent
     //  → https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
-    const pathMatch = url.pathname.match(/^\/proxy\/(.*)/);
+    const pathMatch = url.pathname.match(/^\/v1\/(.*)/);
     if (!pathMatch) {
       return new Response("Not Found", { status: 404 });
     }

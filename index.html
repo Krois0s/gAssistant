@@ -374,7 +374,7 @@
          */
         async function geminiProxyFetch(userText, useGrounding) {
             const model = currentModelName;
-            const url = `${proxyBaseURL}/proxy/v1beta/models/${model}:generateContent?key=${currentAPIKey}`;
+            const url = `${proxyBaseURL}/v1/v1beta/models/${model}:generateContent?key=${currentAPIKey}`;
 
             // 会話履歴をcontents形式に変換
             const contents = [
