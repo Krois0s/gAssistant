@@ -1,11 +1,5 @@
 /**
- * Cloudflare Workers - Gemini API Proxy
- *
- * デプロイ方法:
- * 1. https://workers.cloudflare.com/ にアクセス（無料アカウントでOK）
- * 2. 新しいWorkerを作成し、このコードを貼り付ける
- * 3. デプロイして発行されたURLをメモする（例: https://gemini-proxy.youraccount.workers.dev）
- * 4. index.html の PROXY_BASE_URL にそのURLを設定する
+ * Cloudflare Workers - Gemini API Proxy (Hardened & Hidden Headers)
  */
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com";
@@ -16,50 +10,43 @@ export default {
 
     // CORSプリフライト対応
     if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: cors,
-      });
+      return new Response(null, { status: 204, headers: cors });
     }
 
     const url = new URL(request.url);
-
-    // /v1/* のパスを Gemini API にフォワード
-    // 例: /v1/v1beta/models/gemini-2.5-flash:generateContent
-    //  → https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
     const pathMatch = url.pathname.match(/^\/v1\/(.*)/);
     if (!pathMatch) {
-      // パスが違う場合もCORSヘッダーを付けて404を返す（デバッグしやすくするため）
-      return new Response(`Not Found. Current path is ${url.pathname}, but expected starting with /v1/`, {
-        status: 404,
-        headers: cors
-      });
+      return new Response(`Not Found.`, { status: 404, headers: cors });
     }
 
     const targetPath = pathMatch[1];
     const targetURL = `${GEMINI_BASE}/${targetPath}${url.search}`;
 
-    // リクエストをそのまま転送
+    // ブラウザからのリクエストヘッダー（APIキー含む）をそのまま転送
     const proxyRequest = new Request(targetURL, {
       method: request.method,
-      headers: request.headers,
+      headers: new Headers(request.headers),
       body: request.method !== "GET" && request.method !== "HEAD" ? request.body : null,
       redirect: "follow",
     });
 
     try {
       const response = await fetch(proxyRequest);
+      const newHeaders = new Headers(response.headers);
 
-      // レスポンスにCORSヘッダーを付与して返す
+      // 重複・漏洩防止のためCORSヘッダーを上書き
+      newHeaders.delete("Access-Control-Allow-Origin");
+      newHeaders.delete("Access-Control-Allow-Methods");
+      newHeaders.delete("Access-Control-Allow-Headers");
+      for (const [key, value] of Object.entries(cors)) {
+        newHeaders.set(key, value);
+      }
+
       const newResponse = new Response(response.body, {
         status: response.status,
         statusText: response.statusText,
-        headers: {
-          ...Object.fromEntries(response.headers),
-          ...cors,
-        },
+        headers: newHeaders,
       });
-
       return newResponse;
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), {
