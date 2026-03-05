@@ -268,6 +268,12 @@
                     <option value="gemini-2.5-flash">2.5f</option>
                 </select>
             </div>
+            <div class="input-line">
+                <span class="prompt">SET PROXY_URL=</span>
+                <input type="text" id="proxy-url" placeholder="(optional) https://your-worker.workers.dev"
+                    style="background:transparent;border:none;border-bottom:1px solid var(--border-color);color:var(--text-color);font-family:var(--font-mono);width:100%;outline:none;">
+            </div>
+            <div style="font-size:0.75rem;color:#8b949e;margin-bottom:1rem;"> proxy未設定=直接接続 / 設定時=プロキシ経由</div>
             <button id="start-btn" class="cmd-btn">EXECUTE BOOT SEQUENCE</button>
         </div>
     </div>
@@ -303,11 +309,15 @@
 
         let genAI, model, chatSession;
         let currentAPIKey, currentModelName;
+        // プロキシモード用変数
+        let proxyBaseURL = null;  // 設定されている場合のみ有効
+        let proxyHistory = [];    // プロキシモード時の会話履歴
 
         const setupOverlay = document.getElementById('setup-overlay');
         const mainConsole = document.getElementById('main-console');
         const apiKeyInput = document.getElementById('api-key');
         const modelSelect = document.getElementById('model-select');
+        const proxyUrlInput = document.getElementById('proxy-url');
         const groundingToggle = document.getElementById('grounding-toggle');
         const startBtn = document.getElementById('start-btn');
         const logOutput = document.getElementById('log-output');
@@ -320,102 +330,177 @@
             if (!key) return alert('API_KEY is required.');
 
             const selModel = modelSelect.value;
-            const useGrounding = groundingToggle.checked;
+            const proxyRaw = proxyUrlInput.value.trim().replace(/\/$/, '');
 
             try {
                 currentAPIKey = key;
                 currentModelName = selModel;
-                genAI = new GoogleGenerativeAI(key);
 
-                // Initial model (no tools for ping)
-                model = genAI.getGenerativeModel({ model: selModel });
-
-                // Boot verification
-                const res = await model.generateContent("ping");
-                if (res) {
-                    chatSession = model.startChat({ history: [] });
+                if (proxyRaw) {
+                    // --- プロキシモード ---
+                    proxyBaseURL = proxyRaw;
+                    proxyHistory = [];
+                    // 疎通確認: proxyを通してpingに相当するリクエスト
+                    const pingRes = await geminiProxyFetch('ping', false);
+                    if (!pingRes) throw new Error('Proxy connection failed');
                     setupOverlay.classList.add('hidden');
                     mainConsole.classList.remove('hidden');
-                    hdrModel.textContent = `Target: ${selModel}`;
+                    hdrModel.textContent = `Target: ${selModel} [PROXY]`;
                     apiKeyInput.value = '';
+                } else {
+                    // --- 直接接続モード ---
+                    proxyBaseURL = null;
+                    genAI = new GoogleGenerativeAI(key);
+                    model = genAI.getGenerativeModel({ model: selModel });
+                    const res = await model.generateContent('ping');
+                    if (res) {
+                        chatSession = model.startChat({ history: [] });
+                        setupOverlay.classList.add('hidden');
+                        mainConsole.classList.remove('hidden');
+                        hdrModel.textContent = `Target: ${selModel}`;
+                        apiKeyInput.value = '';
+                    }
                 }
             } catch (e) {
                 alert('BOOT FAILED: ' + e.message);
             }
         });
 
+        /**
+         * プロキシ経由でGemini REST APIを呼び出す（非ストリーミング）
+         * @param {string} userText - ユーザー入力
+         * @param {boolean} useGrounding - グラウンディング有無
+         * @returns {string} - AIの返答テキスト
+         */
+        async function geminiProxyFetch(userText, useGrounding) {
+            const model = currentModelName;
+            const url = `${proxyBaseURL}/proxy/v1beta/models/${model}:generateContent?key=${currentAPIKey}`;
+
+            // 会話履歴をcontents形式に変換
+            const contents = [
+                ...proxyHistory,
+                { role: 'user', parts: [{ text: userText }] }
+            ];
+
+            const body = { contents };
+            if (useGrounding) {
+                body.tools = [{ google_search: {} }];
+            }
+
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`API Error ${res.status}: ${errText}`);
+            }
+
+            const data = await res.json();
+            const candidate = data.candidates?.[0];
+            const replyText = candidate?.content?.parts?.map(p => p.text).join('') ?? '';
+
+            // 履歴に追加
+            proxyHistory.push({ role: 'user', parts: [{ text: userText }] });
+            proxyHistory.push({ role: 'model', parts: [{ text: replyText }] });
+
+            // groundingMetadata があれば返す
+            const groundingMeta = candidate?.groundingMetadata ?? null;
+
+            return { text: replyText, groundingMetadata: groundingMeta };
+        }
+
         async function execCommand() {
             const text = cmdInput.value.trim();
-            if (!text || !chatSession) return;
+            if (!text || (!chatSession && !proxyBaseURL)) return;
 
             appendLog('user', text);
             cmdInput.value = '';
             cmdInput.style.height = '20px';
 
             const useGrounding = groundingToggle.checked;
-
-            // Update model tools on the fly if needed
-            const history = await chatSession.getHistory();
-            const modelConfig = { model: currentModelName };
-            if (useGrounding) {
-                modelConfig.tools = [{ googleSearch: {} }];
-            }
-            model = genAI.getGenerativeModel(modelConfig);
-            chatSession = model.startChat({ history: history });
-
-            // Show indicator while thinking
             const logEntry = appendLog('sys', '. . .');
             logEntry.classList.add('thinking');
 
             try {
-                const result = await chatSession.sendMessageStream(text);
-                let full = '';
-                for await (const chunk of result.stream) {
-                    const chunkText = chunk.text();
-                    if (chunkText) {
-                        if (full === '') {
-                            logEntry.classList.remove('thinking');
-                            logEntry.textContent = ''; // Clear the ". . ."
-                        }
-                        full += chunkText;
-                        logEntry.textContent = full;
-                        logOutput.scrollTop = logOutput.scrollHeight;
-                    }
-                }
+                if (proxyBaseURL) {
+                    // === プロキシモード ===
+                    const result = await geminiProxyFetch(text, useGrounding);
+                    logEntry.classList.remove('thinking');
+                    logEntry.textContent = result.text;
+                    logOutput.scrollTop = logOutput.scrollHeight;
 
-                // Post-process for grounding metadata
-                try {
-                    const response = await result.response;
-                    if (response.groundingMetadata && response.groundingMetadata.groundingChunks) {
+                    // groundingMetadata の表示
+                    if (result.groundingMetadata?.groundingChunks) {
                         const sourcesDiv = document.createElement('div');
                         sourcesDiv.className = 'grounding-sources';
                         sourcesDiv.innerHTML = '<span class="grounding-title">[SOURCES]</span>';
-
                         const uniqueLinks = new Map();
-                        response.groundingMetadata.groundingChunks.forEach(chunk => {
-                            if (chunk.web && chunk.web.uri) {
-                                uniqueLinks.set(chunk.web.uri, chunk.web.title || chunk.web.uri);
-                            }
+                        result.groundingMetadata.groundingChunks.forEach(chunk => {
+                            if (chunk.web?.uri) uniqueLinks.set(chunk.web.uri, chunk.web.title || chunk.web.uri);
                         });
-
                         uniqueLinks.forEach((title, uri) => {
                             const link = document.createElement('a');
-                            link.href = uri;
-                            link.target = '_blank';
+                            link.href = uri; link.target = '_blank';
                             link.className = 'grounding-link';
                             link.textContent = `> ${title}`;
                             sourcesDiv.appendChild(link);
                         });
-
                         if (uniqueLinks.size > 0) {
                             logEntry.parentElement.appendChild(sourcesDiv);
                             logOutput.scrollTop = logOutput.scrollHeight;
                         }
                     }
-                } catch (err) {
-                    console.error('Grounding metadata error:', err);
+                } else {
+                    // === 直接接続モード (ストリーミング) ===
+                    const history = await chatSession.getHistory();
+                    const modelConfig = { model: currentModelName };
+                    if (useGrounding) modelConfig.tools = [{ googleSearch: {} }];
+                    model = genAI.getGenerativeModel(modelConfig);
+                    chatSession = model.startChat({ history });
+
+                    const result = await chatSession.sendMessageStream(text);
+                    let full = '';
+                    for await (const chunk of result.stream) {
+                        const chunkText = chunk.text();
+                        if (chunkText) {
+                            if (full === '') {
+                                logEntry.classList.remove('thinking');
+                                logEntry.textContent = '';
+                            }
+                            full += chunkText;
+                            logEntry.textContent = full;
+                            logOutput.scrollTop = logOutput.scrollHeight;
+                        }
+                    }
+                    try {
+                        const response = await result.response;
+                        if (response.groundingMetadata?.groundingChunks) {
+                            const sourcesDiv = document.createElement('div');
+                            sourcesDiv.className = 'grounding-sources';
+                            sourcesDiv.innerHTML = '<span class="grounding-title">[SOURCES]</span>';
+                            const uniqueLinks = new Map();
+                            response.groundingMetadata.groundingChunks.forEach(chunk => {
+                                if (chunk.web?.uri) uniqueLinks.set(chunk.web.uri, chunk.web.title || chunk.web.uri);
+                            });
+                            uniqueLinks.forEach((title, uri) => {
+                                const link = document.createElement('a');
+                                link.href = uri; link.target = '_blank';
+                                link.className = 'grounding-link';
+                                link.textContent = `> ${title}`;
+                                sourcesDiv.appendChild(link);
+                            });
+                            if (uniqueLinks.size > 0) {
+                                logEntry.parentElement.appendChild(sourcesDiv);
+                                logOutput.scrollTop = logOutput.scrollHeight;
+                            }
+                        }
+                    } catch (err) { console.error('Grounding metadata error:', err); }
                 }
             } catch (e) {
+                logEntry.classList.remove('thinking');
                 logEntry.textContent = `[ERROR] ${e.message}`;
                 logEntry.style.color = '#f85149';
             }
@@ -424,17 +509,19 @@
         resetBtn.addEventListener('click', () => {
             if (!confirm('Clear all conversation history and reset session?')) return;
 
-            // Reset UI
             logOutput.innerHTML = `<div class="log-entry"><span class="log-time">[${getTime()}]</span><span class="log-sys">[SYSTEM]</span> Kernel reset. History purged.</div>`;
 
-            // Reset SDK Session
-            const useGrounding = groundingToggle.checked;
-            const modelConfig = { model: currentModelName };
-            if (useGrounding) {
-                modelConfig.tools = [{ googleSearch: {} }];
+            if (proxyBaseURL) {
+                // プロキシモード: 履歴のみリセット
+                proxyHistory = [];
+            } else {
+                // 直接接続モード: SDKセッションリセット
+                const useGrounding = groundingToggle.checked;
+                const modelConfig = { model: currentModelName };
+                if (useGrounding) modelConfig.tools = [{ googleSearch: {} }];
+                model = genAI.getGenerativeModel(modelConfig);
+                chatSession = model.startChat({ history: [] });
             }
-            model = genAI.getGenerativeModel(modelConfig);
-            chatSession = model.startChat({ history: [] });
         });
 
         function appendLog(role, text) {
