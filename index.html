@@ -7,11 +7,16 @@
     <title>System Diagnostic Console</title>
     <style>
         :root {
-            --bg-color: #0d1117;
-            --text-color: #c9d1d9;
-            --accent-color: #58a6ff;
-            --user-color: #7ee787;
-            --border-color: #30363d;
+            --bg-color: #faf9f8;
+            --panel-bg: #ffffff;
+            --header-footer-bg: #f3f2f1;
+            --text-color: #323130;
+            --text-secondary: #605e5c;
+            --accent-color: #0078d4;
+            --user-color: #107c41;
+            --border-color: #edebe9;
+            --error-color: #a80000;
+            --font-sans: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', sans-serif;
             --font-mono: 'Consolas', 'Monaco', 'Courier New', monospace;
         }
 
@@ -24,7 +29,7 @@
         body {
             background-color: var(--bg-color);
             color: var(--text-color);
-            font-family: var(--font-mono);
+            font-family: var(--font-sans);
             height: 100vh;
             display: flex;
             flex-direction: column;
@@ -47,55 +52,78 @@
         }
 
         .auth-box {
+            background: var(--panel-bg);
             border: 1px solid var(--border-color);
-            padding: 2rem;
-            width: 400px;
+            padding: 2.5rem;
+            width: 440px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+            border-radius: 4px;
         }
 
         .auth-box h2 {
-            font-size: 1.2rem;
-            margin-bottom: 1rem;
-            color: var(--accent-color);
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            color: var(--text-color);
         }
 
         .input-line {
             display: flex;
-            margin-bottom: 1rem;
+            flex-direction: column;
+            margin-bottom: 1.2rem;
+            gap: 0.3rem;
         }
 
         .prompt {
-            color: var(--accent-color);
-            margin-right: 0.5rem;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-right: 0;
         }
 
+        input[type="text"],
         input[type="password"],
         select {
-            background: transparent;
-            border: none;
-            border-bottom: 1px solid var(--border-color);
+            background: var(--panel-bg);
+            border: 1px solid #a19f9d;
+            border-radius: 2px;
+            padding: 0.4rem 0.6rem;
             color: var(--text-color);
-            font-family: var(--font-mono);
+            font-family: var(--font-sans);
             width: 100%;
             outline: none;
+            font-size: 0.9rem;
+            transition: border-color 0.15s ease;
         }
 
-        /* Set dropdown options to black text on white background for visibility */
+        input[type="text"]:focus,
+        input[type="password"]:focus,
+        select:focus {
+            border-color: var(--accent-color);
+        }
+
+        /* Set dropdown options */
         select option {
-            background-color: #ffffff;
-            color: #000000;
+            background-color: var(--panel-bg);
+            color: var(--text-color);
         }
 
         button.cmd-btn {
-            background: transparent;
-            color: var(--accent-color);
-            border: 1px solid var(--accent-color);
-            padding: 0.5rem 1rem;
+            background: var(--accent-color);
+            color: #ffffff;
+            border: none;
+            border-radius: 2px;
+            padding: 0.6rem 1.2rem;
             cursor: pointer;
-            font-family: var(--font-mono);
+            font-family: var(--font-sans);
+            font-weight: 600;
+            font-size: 0.9rem;
+            width: 100%;
+            transition: background-color 0.15s ease;
         }
 
         button.cmd-btn:hover {
-            background: rgba(88, 166, 255, 0.1);
+            background: #005a9e;
         }
 
         /* Console Layout */
@@ -103,86 +131,103 @@
             height: 100vh;
             display: flex;
             flex-direction: column;
+            background-color: var(--bg-color);
         }
 
         header {
-            padding: 0.5rem 1rem;
+            padding: 0.6rem 1.2rem;
             border-bottom: 1px solid var(--border-color);
+            background-color: var(--panel-bg);
             display: flex;
             justify-content: space-between;
             align-items: center;
-            color: #8b949e;
+            color: var(--text-secondary);
             font-size: 0.8rem;
             flex-shrink: 0;
         }
 
         #reset-btn {
-            background: rgba(248, 81, 73, 0.1);
-            color: #f85149;
-            border: 1px solid rgba(248, 81, 73, 0.4);
-            padding: 2px 8px;
+            background: transparent;
+            color: var(--error-color);
+            border: 1px solid var(--error-color);
+            padding: 3px 10px;
             cursor: pointer;
-            font-family: var(--font-mono);
-            font-size: 0.7rem;
-            border-radius: 3px;
+            font-family: var(--font-sans);
+            font-size: 0.75rem;
+            border-radius: 2px;
+            transition: all 0.15s ease;
         }
 
         #reset-btn:hover {
-            background: rgba(248, 81, 73, 0.2);
-            border-color: #f85149;
+            background: var(--error-color);
+            color: #ffffff;
         }
 
         #log-output {
             flex: 1;
             min-height: 0;
             overflow-y: auto;
-            padding: 1rem;
+            padding: 1.5rem;
             display: flex;
             flex-direction: column;
-            gap: 0.5rem;
+            gap: 0.8rem;
+            background-color: var(--panel-bg);
         }
 
         .log-entry {
             white-space: pre-wrap;
             word-wrap: break-word;
+            line-height: 1.5;
+            color: var(--text-color);
+            font-family: var(--font-sans);
         }
 
         .log-time {
-            color: #8b949e;
-            margin-right: 0.5rem;
+            color: var(--text-secondary);
+            margin-right: 0.6rem;
+            font-size: 0.8rem;
         }
 
         .log-user {
             color: var(--user-color);
-            font-weight: bold;
+            font-weight: 600;
         }
 
         .log-sys {
             color: var(--accent-color);
-            font-weight: bold;
+            font-weight: 600;
         }
 
         footer {
-            padding: 0.5rem 1rem;
+            padding: 0.8rem 1.2rem;
             border-top: 1px solid var(--border-color);
-            background: #161b22;
+            background-color: var(--header-footer-bg);
         }
 
         .cmd-line {
             display: flex;
             align-items: center;
-            gap: 0.8rem;
+            gap: 1rem;
         }
 
         #cmd-input {
-            background: transparent;
-            border: none;
+            background: var(--panel-bg);
+            border: 1px solid #d2d0ce;
+            border-radius: 2px;
+            padding: 0.5rem 0.8rem;
             color: var(--text-color);
-            font-family: var(--font-mono);
+            font-family: var(--font-sans);
             flex-grow: 1;
             outline: none;
             resize: none;
-            height: 20px;
+            height: 36px;
+            min-height: 36px;
+            line-height: 1.4;
+            transition: border-color 0.15s ease;
+        }
+
+        #cmd-input:focus {
+            border-color: var(--accent-color);
         }
 
         .hidden {
@@ -191,11 +236,12 @@
 
         .cursor {
             display: inline-block;
-            width: 8px;
-            height: 15px;
+            width: 2px;
+            height: 16px;
             background: var(--text-color);
             animation: blink 1s step-end infinite;
             vertical-align: middle;
+            margin-left: 2px;
         }
 
         @keyframes blink {
@@ -205,18 +251,19 @@
         }
 
         .grounding-sources {
-            margin-top: 0.5rem;
-            padding-top: 0.5rem;
+            margin-top: 0.6rem;
+            padding-top: 0.6rem;
             border-top: 1px dashed var(--border-color);
-            font-size: 0.85rem;
-            color: #8b949e;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
         }
 
         .grounding-link {
             display: inline-block;
-            margin-right: 1rem;
+            margin-right: 1.2rem;
             color: var(--accent-color);
             text-decoration: none;
+            font-weight: 500;
         }
 
         .grounding-link:hover {
@@ -226,13 +273,28 @@
         .grounding-title {
             font-weight: bold;
             display: block;
-            margin-bottom: 0.2rem;
-            color: #8b949e;
+            margin-bottom: 0.3rem;
+            color: var(--text-secondary);
+        }
+
+        .grounding-toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .grounding-toggle-container input[type="checkbox"] {
+            cursor: pointer;
+            accent-color: var(--accent-color);
         }
 
         /* Subtle Thinking Indicator */
         .thinking {
-            color: #444d56;
+            color: var(--text-secondary);
             animation: thinking-pulse 1s ease-in-out infinite;
         }
 
@@ -240,7 +302,7 @@
 
             0%,
             100% {
-                opacity: 0.3;
+                opacity: 0.4;
             }
 
             50% {
@@ -262,18 +324,17 @@
             <div class="input-line">
                 <span class="prompt">SET TARGET</span>
                 <select id="model-select">
+                    <option value="gemini-3.5-flash">3.5f</option>
                     <option value="gemini-3-flash-preview">3f</option>
                     <option value="gemini-3.1-pro-preview">3.1p</option>
-                    <option value="gemini-2.5-pro">2.5p</option>
-                    <option value="gemini-2.5-flash">2.5f</option>
                 </select>
             </div>
             <div class="input-line">
                 <span class="prompt">SET PROXY_URL=</span>
-                <input type="text" id="proxy-url" placeholder="(optional) https://your-worker.workers.dev"
-                    style="background:transparent;border:none;border-bottom:1px solid var(--border-color);color:var(--text-color);font-family:var(--font-mono);width:100%;outline:none;">
+                <input type="text" id="proxy-url" placeholder="(optional) https://your-worker.workers.dev">
             </div>
-            <div style="font-size:0.75rem;color:#8b949e;margin-bottom:1rem;"> proxy未設定=直接接続 / 設定時=プロキシ経由</div>
+            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:1rem;"> proxy未設定=直接接続 / 設定時=プロキシ経由
+            </div>
             <button id="start-btn" class="cmd-btn">EXECUTE BOOT SEQUENCE</button>
         </div>
     </div>
@@ -422,7 +483,7 @@
 
             appendLog('user', text);
             cmdInput.value = '';
-            cmdInput.style.height = '20px';
+            cmdInput.style.height = '36px';
 
             const useGrounding = groundingToggle.checked;
             const logEntry = appendLog('sys', '. . .');
