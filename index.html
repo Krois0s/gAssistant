@@ -460,7 +460,9 @@
 
             if (!res.ok) {
                 const errText = await res.text();
-                throw new Error(`API Error ${res.status}: ${errText}`);
+                const err = new Error(`API Error ${res.status}: ${errText}`);
+                err.status = res.status;
+                throw err;
             }
 
             const data = await res.json();
@@ -492,7 +494,11 @@
             try {
                 if (proxyBaseURL) {
                     // === プロキシモード ===
-                    const result = await geminiProxyFetch(text, useGrounding);
+                    const result = await retryWithBackoff(
+                        async () => await geminiProxyFetch(text, useGrounding),
+                        5,
+                        1000
+                    );
                     logEntry.classList.remove('thinking');
                     logEntry.textContent = result.text;
                     logOutput.scrollTop = logOutput.scrollHeight;
@@ -526,7 +532,11 @@
                     model = genAI.getGenerativeModel(modelConfig);
                     chatSession = model.startChat({ history });
 
-                    const result = await chatSession.sendMessageStream(text);
+                    const result = await retryWithBackoff(
+                        async () => await chatSession.sendMessageStream(text),
+                        5,
+                        1000
+                    );
                     let full = '';
                     for await (const chunk of result.stream) {
                         const chunkText = chunk.text();
@@ -601,6 +611,65 @@
             logOutput.appendChild(entry);
             logOutput.scrollTop = logOutput.scrollHeight;
             return entry.querySelector('.log-content');
+        }
+
+        function appendSystemWarning(text) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            const time = getTime();
+            entry.innerHTML = `<span class="log-time">[${time}]</span><span class="log-sys" style="color:var(--error-color);">[SYSTEM]</span> <span style="color:var(--text-secondary);">${text}</span>`;
+            logOutput.appendChild(entry);
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+
+        function isRetryableError(error) {
+            const status = error.status || (error.message && error.message.match(/status (?:code )?(\d+)/)?.[1]);
+            const msg = (error.message || "").toLowerCase();
+
+            if (status) {
+                const statusCode = parseInt(status, 10);
+                // 429 (Too Many Requests), 5xx (Server Errors) はリトライ可能
+                return statusCode === 429 || (statusCode >= 500 && statusCode < 600);
+            }
+
+            if (msg.includes("503") || msg.includes("504") || msg.includes("429") || 
+                msg.includes("service unavailable") || msg.includes("resource exhausted") ||
+                msg.includes("rate limit") || msg.includes("overloaded") || 
+                msg.includes("failed to fetch") || msg.includes("network error") ||
+                msg.includes("user agent is offline")) {
+                return true;
+            }
+
+            if (error instanceof TypeError && msg.includes("fetch")) {
+                return true;
+            }
+
+            return false;
+        }
+
+        async function retryWithBackoff(fn, maxRetries = 5, baseDelay = 1000) {
+            let attempt = 0;
+            while (true) {
+                try {
+                    return await fn();
+                } catch (error) {
+                    attempt++;
+                    const retryable = isRetryableError(error);
+                    
+                    if (attempt > maxRetries || !retryable) {
+                        throw error;
+                    }
+                    
+                    const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 1000;
+                    const sec = (delay / 1000).toFixed(1);
+                    const status = error.status || "";
+                    const statusStr = status ? ` (${status})` : "";
+                    
+                    appendSystemWarning(`Connection interrupted${statusStr}. Retrying in ${sec}s... (attempt ${attempt}/${maxRetries})`);
+                    
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
         }
 
         function getTime() {
