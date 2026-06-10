@@ -318,6 +318,13 @@
         <div class="auth-box">
             <h2>> SYSTEM CONFIGURATION</h2>
             <div class="input-line">
+                <span class="prompt">SET PROVIDER</span>
+                <select id="provider-select">
+                    <option value="gemini" selected>Gemini</option>
+                    <option value="bedrock">AWS Bedrock (OpenAI互換)</option>
+                </select>
+            </div>
+            <div class="input-line">
                 <span class="prompt">SET API_KEY=</span>
                 <input type="password" id="api-key" placeholder="Enter key...">
             </div>
@@ -329,11 +336,11 @@
                     <option value="gemini-3.1-pro-preview">3.1p</option>
                 </select>
             </div>
-            <div class="input-line">
-                <span class="prompt">SET PROXY_URL=</span>
+            <div class="input-line" id="proxy-url-container">
+                <span class="prompt" id="url-prompt">SET PROXY_URL=</span>
                 <input type="text" id="proxy-url" placeholder="(optional) https://your-worker.workers.dev">
             </div>
-            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:1rem;"> proxy未設定=直接接続 / 設定時=プロキシ経由
+            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:1rem;" id="proxy-help"> proxy未設定=直接接続 / 設定時=プロキシ経由
             </div>
             <button id="start-btn" class="cmd-btn">EXECUTE BOOT SEQUENCE</button>
         </div>
@@ -369,16 +376,21 @@
         import { GoogleGenerativeAI } from "https://esm.run/@google/generative-ai";
 
         let genAI, model, chatSession;
-        let currentAPIKey, currentModelName;
+        let currentAPIKey, currentModelName, currentProvider;
         // プロキシモード用変数
         let proxyBaseURL = null;  // 設定されている場合のみ有効
         let proxyHistory = [];    // プロキシモード時の会話履歴
+        let bedrockBaseURL = null; // AWS Bedrock用のベースURL
+        let bedrockHistory = [];   // AWS Bedrock用の会話履歴
 
         const setupOverlay = document.getElementById('setup-overlay');
         const mainConsole = document.getElementById('main-console');
+        const providerSelect = document.getElementById('provider-select');
         const apiKeyInput = document.getElementById('api-key');
         const modelSelect = document.getElementById('model-select');
         const proxyUrlInput = document.getElementById('proxy-url');
+        const urlPrompt = document.getElementById('url-prompt');
+        const proxyHelp = document.getElementById('proxy-help');
         const groundingToggle = document.getElementById('grounding-toggle');
         const startBtn = document.getElementById('start-btn');
         const logOutput = document.getElementById('log-output');
@@ -386,41 +398,89 @@
         const hdrModel = document.getElementById('header-model');
         const resetBtn = document.getElementById('reset-btn');
 
+        providerSelect.addEventListener('change', () => {
+            const provider = providerSelect.value;
+            modelSelect.innerHTML = '';
+            
+            if (provider === 'gemini') {
+                const opt1 = new Option('3.5f', 'gemini-3.5-flash');
+                const opt2 = new Option('3f', 'gemini-3-flash-preview');
+                const opt3 = new Option('3.1p', 'gemini-3.1-pro-preview');
+                modelSelect.add(opt1);
+                modelSelect.add(opt2);
+                modelSelect.add(opt3);
+                
+                urlPrompt.textContent = 'SET PROXY_URL=';
+                proxyUrlInput.placeholder = '(optional) https://your-worker.workers.dev';
+                proxyHelp.textContent = 'proxy未設定=直接接続 / 設定時=プロキシ経由';
+            } else if (provider === 'bedrock') {
+                const opt1 = new Option('Nova Pro', 'amazon.nova-pro-v1:0');
+                const opt2 = new Option('Nova Lite', 'amazon.nova-lite-v1:0');
+                const opt3 = new Option('Nova Micro', 'amazon.nova-micro-v1:0');
+                modelSelect.add(opt1);
+                modelSelect.add(opt2);
+                modelSelect.add(opt3);
+                
+                urlPrompt.textContent = 'SET BASE_URL=';
+                proxyUrlInput.placeholder = 'https://your-bedrock-endpoint.com';
+                proxyHelp.textContent = 'OpenAI互換APIのエンドポイントURLを入力してください';
+            }
+        });
+
         startBtn.addEventListener('click', async () => {
             const key = apiKeyInput.value.trim();
             if (!key) return alert('API_KEY is required.');
 
+            const provider = providerSelect.value;
             const selModel = modelSelect.value;
             const proxyRaw = proxyUrlInput.value.trim().replace(/\/$/, '');
 
             try {
                 currentAPIKey = key;
                 currentModelName = selModel;
+                currentProvider = provider;
 
-                if (proxyRaw) {
-                    // --- プロキシモード ---
-                    proxyBaseURL = proxyRaw;
-                    proxyHistory = [];
-                    // 疎通確認: proxyを通してpingに相当するリクエスト
-                    const pingRes = await geminiProxyFetch('ping', false);
-                    if (!pingRes) throw new Error('Proxy connection failed');
-                    setupOverlay.classList.add('hidden');
-                    mainConsole.classList.remove('hidden');
-                    hdrModel.textContent = `Target: ${selModel} [PROXY]`;
-                    apiKeyInput.value = '';
-                } else {
-                    // --- 直接接続モード ---
-                    proxyBaseURL = null;
-                    genAI = new GoogleGenerativeAI(key);
-                    model = genAI.getGenerativeModel({ model: selModel });
-                    const res = await model.generateContent('ping');
-                    if (res) {
-                        chatSession = model.startChat({ history: [] });
+                if (provider === 'gemini') {
+                    if (proxyRaw) {
+                        // --- プロキシモード ---
+                        proxyBaseURL = proxyRaw;
+                        proxyHistory = [];
+                        // 疎通確認: proxyを通してpingに相当するリクエスト
+                        const pingRes = await geminiProxyFetch('ping', false);
+                        if (!pingRes) throw new Error('Proxy connection failed');
                         setupOverlay.classList.add('hidden');
                         mainConsole.classList.remove('hidden');
-                        hdrModel.textContent = `Target: ${selModel}`;
+                        hdrModel.textContent = `Target: ${selModel} [PROXY]`;
                         apiKeyInput.value = '';
+                    } else {
+                        // --- 直接接続モード ---
+                        proxyBaseURL = null;
+                        genAI = new GoogleGenerativeAI(key);
+                        model = genAI.getGenerativeModel({ model: selModel });
+                        const res = await model.generateContent('ping');
+                        if (res) {
+                            chatSession = model.startChat({ history: [] });
+                            setupOverlay.classList.add('hidden');
+                            mainConsole.classList.remove('hidden');
+                            hdrModel.textContent = `Target: ${selModel}`;
+                            apiKeyInput.value = '';
+                        }
                     }
+                } else if (provider === 'bedrock') {
+                    if (!proxyRaw) {
+                        throw new Error('BASE_URL is required for AWS Bedrock.');
+                    }
+                    bedrockBaseURL = proxyRaw;
+                    bedrockHistory = [];
+
+                    // 疎通確認: 非ストリームで疎通テスト
+                    const pingRes = await bedrockFetch('ping');
+                    if (!pingRes) throw new Error('Bedrock connection failed');
+
+                    setupOverlay.classList.add('hidden');
+                    mainConsole.classList.remove('hidden');
+                    hdrModel.textContent = `Target: ${selModel} [Bedrock]`;
+                    apiKeyInput.value = '';
                 }
             } catch (e) {
                 alert('BOOT FAILED: ' + e.message);
@@ -479,9 +539,94 @@
             return { text: replyText, groundingMetadata: groundingMeta };
         }
 
+        /**
+         * AWS Bedrock (OpenAI互換) REST APIを呼び出す（非ストリーミング、疎通確認用など）
+         * @param {string} userText - ユーザー入力
+         * @returns {string} - AIの返答テキスト
+         */
+        async function bedrockFetch(userText) {
+            const model = currentModelName;
+            const url = `${bedrockBaseURL}/v1/chat/completions`;
+
+            const messages = [
+                ...bedrockHistory,
+                { role: 'user', content: userText }
+            ];
+
+            const body = {
+                model: model,
+                messages: messages,
+                stream: false
+            };
+
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${currentAPIKey}`
+                },
+                body: JSON.stringify(body),
+            });
+
+            if (!res.ok) {
+                const errText = await res.text();
+                const err = new Error(`API Error ${res.status}: ${errText}`);
+                err.status = res.status;
+                throw err;
+            }
+
+            const data = await res.json();
+            const replyText = data.choices?.[0]?.message?.content ?? '';
+
+            // 履歴に追加
+            bedrockHistory.push({ role: 'user', content: userText });
+            bedrockHistory.push({ role: 'assistant', content: replyText });
+
+            return replyText;
+        }
+
+        /**
+         * AWS Bedrock (OpenAI互換) REST APIを呼び出す（ストリーミング）
+         * @param {string} userText - ユーザー入力
+         * @returns {ReadableStream} - レスポンスストリーム
+         */
+        async function bedrockFetchStream(userText) {
+            const model = currentModelName;
+            const url = `${bedrockBaseURL}/v1/chat/completions`;
+
+            const messages = [
+                ...bedrockHistory,
+                { role: 'user', content: userText }
+            ];
+
+            const body = {
+                model: model,
+                messages: messages,
+                stream: true
+            };
+
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${currentAPIKey}`
+                },
+                body: JSON.stringify(body),
+            });
+
+            if (!res.ok) {
+                const errText = await res.text();
+                const err = new Error(`API Error ${res.status}: ${errText}`);
+                err.status = res.status;
+                throw err;
+            }
+
+            return res.body;
+        }
+
         async function execCommand() {
             const text = cmdInput.value.trim();
-            if (!text || (!chatSession && !proxyBaseURL)) return;
+            if (!text || (!chatSession && !proxyBaseURL && !bedrockBaseURL)) return;
 
             appendLog('user', text);
             cmdInput.value = '';
@@ -492,7 +637,64 @@
             logEntry.classList.add('thinking');
 
             try {
-                if (proxyBaseURL) {
+                if (currentProvider === 'bedrock') {
+                    // === AWS Bedrock (OpenAI互換) モード (ストリーミング) ===
+                    if (useGrounding) {
+                        appendSystemWarning('Note: Google Search Grounding is not supported on AWS Bedrock.');
+                    }
+
+                    const resultStream = await retryWithBackoff(
+                        async () => await bedrockFetchStream(text),
+                        5,
+                        1000
+                    );
+
+                    let full = '';
+                    const reader = resultStream.getReader();
+                    const decoder = new TextDecoder('utf-8');
+                    let buffer = '';
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop(); // 最後の不完全な行を残す
+
+                        for (const line of lines) {
+                            const cleanLine = line.trim();
+                            if (!cleanLine) continue;
+                            if (cleanLine === 'data: [DONE]') continue;
+
+                            if (cleanLine.startsWith('data: ')) {
+                                try {
+                                    const jsonStr = cleanLine.slice(6);
+                                    const parsed = JSON.parse(jsonStr);
+                                    const chunkText = parsed.choices?.[0]?.delta?.content ?? '';
+                                    if (chunkText) {
+                                        if (full === '') {
+                                            logEntry.classList.remove('thinking');
+                                            logEntry.textContent = '';
+                                        }
+                                        full += chunkText;
+                                        logEntry.textContent = full;
+                                        logOutput.scrollTop = logOutput.scrollHeight;
+                                    }
+                                } catch (err) {
+                                    console.error('Error parsing SSE line:', cleanLine, err);
+                                }
+                            }
+                        }
+                    }
+
+                    // 履歴に追加
+                    bedrockHistory.push({ role: 'user', content: text });
+                    bedrockHistory.push({ role: 'assistant', content: full });
+                    
+                    logOutput.scrollTop = logOutput.scrollHeight;
+
+                } else if (proxyBaseURL) {
                     // === プロキシモード ===
                     const result = await retryWithBackoff(
                         async () => await geminiProxyFetch(text, useGrounding),
@@ -586,7 +788,9 @@
 
             logOutput.innerHTML = `<div class="log-entry"><span class="log-time">[${getTime()}]</span><span class="log-sys">[SYSTEM]</span> Kernel reset. History purged.</div>`;
 
-            if (proxyBaseURL) {
+            if (currentProvider === 'bedrock') {
+                bedrockHistory = [];
+            } else if (proxyBaseURL) {
                 // プロキシモード: 履歴のみリセット
                 proxyHistory = [];
             } else {
