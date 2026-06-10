@@ -414,6 +414,7 @@
                 urlPrompt.textContent = 'SET PROXY_URL=';
                 proxyUrlInput.placeholder = '(optional) https://your-worker.workers.dev';
                 proxyHelp.textContent = 'proxy未設定=直接接続 / 設定時=プロキシ経由';
+                groundingToggle.checked = true;
             } else if (provider === 'bedrock') {
                 const opt1 = new Option('Nova Pro', 'us.amazon.nova-pro-v1:0');
                 const opt2 = new Option('Nova Lite', 'us.amazon.nova-lite-v1:0');
@@ -431,6 +432,7 @@
                 urlPrompt.textContent = 'SET BASE_URL=';
                 proxyUrlInput.placeholder = 'https://your-bedrock-endpoint.com';
                 proxyHelp.textContent = 'OpenAI互換APIのエンドポイントURLを入力してください';
+                groundingToggle.checked = false;
             }
         });
 
