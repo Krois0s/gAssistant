@@ -320,8 +320,8 @@
             <div class="input-line">
                 <span class="prompt">SET PROVIDER</span>
                 <select id="provider-select">
-                    <option value="gemini" selected>Gemini</option>
-                    <option value="bedrock">AWS Bedrock (OpenAI互換)</option>
+                    <option value="gemini" selected>Gem</option>
+                    <option value="bedrock">Bedrock (OA互換)</option>
                 </select>
             </div>
             <div class="input-line">
@@ -340,7 +340,8 @@
                 <span class="prompt" id="url-prompt">SET PROXY_URL=</span>
                 <input type="text" id="proxy-url" placeholder="(optional) https://your-worker.workers.dev">
             </div>
-            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:1rem;" id="proxy-help"> proxy未設定=直接接続 / 設定時=プロキシ経由
+            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:1rem;" id="proxy-help">
+                proxy未設定=直接接続 / 設定時=プロキシ経由
             </div>
             <button id="start-btn" class="cmd-btn">EXECUTE BOOT SEQUENCE</button>
         </div>
@@ -401,7 +402,7 @@
         providerSelect.addEventListener('change', () => {
             const provider = providerSelect.value;
             modelSelect.innerHTML = '';
-            
+
             if (provider === 'gemini') {
                 const opt1 = new Option('3.5f', 'gemini-3.5-flash');
                 const opt2 = new Option('3f', 'gemini-3-flash-preview');
@@ -409,18 +410,24 @@
                 modelSelect.add(opt1);
                 modelSelect.add(opt2);
                 modelSelect.add(opt3);
-                
+
                 urlPrompt.textContent = 'SET PROXY_URL=';
                 proxyUrlInput.placeholder = '(optional) https://your-worker.workers.dev';
                 proxyHelp.textContent = 'proxy未設定=直接接続 / 設定時=プロキシ経由';
             } else if (provider === 'bedrock') {
-                const opt1 = new Option('Nova Pro', 'amazon.nova-pro-v1:0');
-                const opt2 = new Option('Nova Lite', 'amazon.nova-lite-v1:0');
-                const opt3 = new Option('Nova Micro', 'amazon.nova-micro-v1:0');
+                const opt1 = new Option('Nova Pro', 'us.amazon.nova-pro-v1:0');
+                const opt2 = new Option('Nova Lite', 'us.amazon.nova-lite-v1:0');
+                const opt3 = new Option('Nova Micro', 'us.amazon.nova-micro-v1:0');
+                const opt4 = new Option('Sonnet-46', 'us.anthropic.claude-sonnet-4-6');
+                const opt5 = new Option('Opus-47', 'us.anthropic.claude-opus-4-7');
+                const opt6 = new Option('Mistral Large 3', 'us.mistral.mistral-large-3-675b-instruct');
                 modelSelect.add(opt1);
                 modelSelect.add(opt2);
                 modelSelect.add(opt3);
-                
+                modelSelect.add(opt4);
+                modelSelect.add(opt5);
+                modelSelect.add(opt6);
+
                 urlPrompt.textContent = 'SET BASE_URL=';
                 proxyUrlInput.placeholder = 'https://your-bedrock-endpoint.com';
                 proxyHelp.textContent = 'OpenAI互換APIのエンドポイントURLを入力してください';
@@ -474,7 +481,7 @@
                     bedrockHistory = [];
 
                     // 疎通確認: 非ストリームで疎通テスト
-                    const pingRes = await bedrockFetch('ping');
+                    const pingRes = await bedrockFetch('ping', false);
                     if (!pingRes) throw new Error('Bedrock connection failed');
 
                     setupOverlay.classList.add('hidden');
@@ -544,7 +551,7 @@
          * @param {string} userText - ユーザー入力
          * @returns {string} - AIの返答テキスト
          */
-        async function bedrockFetch(userText) {
+        async function bedrockFetch(userText, addToHistory = true) {
             const model = currentModelName;
             const url = `${bedrockBaseURL}/v1/chat/completions`;
 
@@ -578,9 +585,11 @@
             const data = await res.json();
             const replyText = data.choices?.[0]?.message?.content ?? '';
 
-            // 履歴に追加
-            bedrockHistory.push({ role: 'user', content: userText });
-            bedrockHistory.push({ role: 'assistant', content: replyText });
+            // 履歴に追加 (ping等の疎通確認時はスキップ)
+            if (addToHistory) {
+                bedrockHistory.push({ role: 'user', content: userText });
+                bedrockHistory.push({ role: 'assistant', content: replyText });
+            }
 
             return replyText;
         }
@@ -638,60 +647,25 @@
 
             try {
                 if (currentProvider === 'bedrock') {
-                    // === AWS Bedrock (OpenAI互換) モード (ストリーミング) ===
+                    // === AWS Bedrock (OpenAI互換) モード (非ストリーミングに変更) ===
                     if (useGrounding) {
                         appendSystemWarning('Note: Google Search Grounding is not supported on AWS Bedrock.');
                     }
 
-                    const resultStream = await retryWithBackoff(
-                        async () => await bedrockFetchStream(text),
+                    // すでに実装済みの非ストリーミング用関数 bedrockFetch を呼び出す
+                    const replyText = await retryWithBackoff(
+                        async () => await bedrockFetch(text),
                         5,
                         1000
                     );
 
-                    let full = '';
-                    const reader = resultStream.getReader();
-                    const decoder = new TextDecoder('utf-8');
-                    let buffer = '';
+                    // 画面の「. . .（考え中）」を消して、AIの返答を一括表示
+                    logEntry.classList.remove('thinking');
+                    logEntry.textContent = replyText;
 
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
+                    // ※履歴への追加（bedrockHistory.push）は、bedrockFetch関数の中で
+                    // すでに行われているため、ここでは何もしなくてOKです（重複防止）。
 
-                        buffer += decoder.decode(value, { stream: true });
-                        const lines = buffer.split('\n');
-                        buffer = lines.pop(); // 最後の不完全な行を残す
-
-                        for (const line of lines) {
-                            const cleanLine = line.trim();
-                            if (!cleanLine) continue;
-                            if (cleanLine === 'data: [DONE]') continue;
-
-                            if (cleanLine.startsWith('data: ')) {
-                                try {
-                                    const jsonStr = cleanLine.slice(6);
-                                    const parsed = JSON.parse(jsonStr);
-                                    const chunkText = parsed.choices?.[0]?.delta?.content ?? '';
-                                    if (chunkText) {
-                                        if (full === '') {
-                                            logEntry.classList.remove('thinking');
-                                            logEntry.textContent = '';
-                                        }
-                                        full += chunkText;
-                                        logEntry.textContent = full;
-                                        logOutput.scrollTop = logOutput.scrollHeight;
-                                    }
-                                } catch (err) {
-                                    console.error('Error parsing SSE line:', cleanLine, err);
-                                }
-                            }
-                        }
-                    }
-
-                    // 履歴に追加
-                    bedrockHistory.push({ role: 'user', content: text });
-                    bedrockHistory.push({ role: 'assistant', content: full });
-                    
                     logOutput.scrollTop = logOutput.scrollHeight;
 
                 } else if (proxyBaseURL) {
@@ -836,9 +810,9 @@
                 return statusCode === 429 || (statusCode >= 500 && statusCode < 600);
             }
 
-            if (msg.includes("503") || msg.includes("504") || msg.includes("429") || 
+            if (msg.includes("503") || msg.includes("504") || msg.includes("429") ||
                 msg.includes("service unavailable") || msg.includes("resource exhausted") ||
-                msg.includes("rate limit") || msg.includes("overloaded") || 
+                msg.includes("rate limit") || msg.includes("overloaded") ||
                 msg.includes("failed to fetch") || msg.includes("network error") ||
                 msg.includes("user agent is offline")) {
                 return true;
@@ -859,18 +833,18 @@
                 } catch (error) {
                     attempt++;
                     const retryable = isRetryableError(error);
-                    
+
                     if (attempt > maxRetries || !retryable) {
                         throw error;
                     }
-                    
+
                     const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 1000;
                     const sec = (delay / 1000).toFixed(1);
                     const status = error.status || "";
                     const statusStr = status ? ` (${status})` : "";
-                    
+
                     appendSystemWarning(`Connection interrupted${statusStr}. Retrying in ${sec}s... (attempt ${attempt}/${maxRetries})`);
-                    
+
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
             }
