@@ -417,7 +417,7 @@
                 groundingToggle.checked = true;
             } else if (provider === 'bedrock') {
                 const opt1 = new Option('Nova Pro', 'us.amazon.nova-pro-v1:0');
-                const opt2 = new Option('Nova Lite', 'us.amazon.nova-lite-v1:0');
+                const opt2 = new Option('Nova 2 Lite', 'us.amazon.nova-2-lite-v1:0');
                 const opt3 = new Option('Nova Micro', 'us.amazon.nova-micro-v1:0');
                 const opt4 = new Option('Sonnet-46', 'us.anthropic.claude-sonnet-4-6');
                 const opt5 = new Option('Opus-47', 'us.anthropic.claude-opus-4-7');
@@ -553,8 +553,11 @@
          * @param {string} userText - ユーザー入力
          * @returns {string} - AIの返答テキスト
          */
-        async function bedrockFetch(userText, addToHistory = true) {
-            const model = currentModelName;
+        async function bedrockFetch(userText, addToHistory = true, useGrounding = false) {
+            let model = currentModelName;
+            if (useGrounding) {
+                model += '-search';
+            }
             const url = `${bedrockBaseURL}/v1/chat/completions`;
 
             const messages = [
@@ -601,8 +604,11 @@
          * @param {string} userText - ユーザー入力
          * @returns {ReadableStream} - レスポンスストリーム
          */
-        async function bedrockFetchStream(userText) {
-            const model = currentModelName;
+        async function bedrockFetchStream(userText, useGrounding = false) {
+            let model = currentModelName;
+            if (useGrounding) {
+                model += '-search';
+            }
             const url = `${bedrockBaseURL}/v1/chat/completions`;
 
             const messages = [
@@ -650,13 +656,10 @@
             try {
                 if (currentProvider === 'bedrock') {
                     // === AWS Bedrock (OpenAI互換) モード (非ストリーミングに変更) ===
-                    if (useGrounding) {
-                        appendSystemWarning('Note: Google Search Grounding is not supported on AWS Bedrock.');
-                    }
 
                     // すでに実装済みの非ストリーミング用関数 bedrockFetch を呼び出す
                     const replyText = await retryWithBackoff(
-                        async () => await bedrockFetch(text),
+                        async () => await bedrockFetch(text, true, useGrounding),
                         5,
                         1000
                     );
