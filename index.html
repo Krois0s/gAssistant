@@ -309,6 +309,31 @@
                 opacity: 1;
             }
         }
+
+        #thinking-select {
+            width: auto;
+            padding: 2px 6px;
+            font-size: 0.75rem;
+            border-color: #d2d0ce;
+            height: 22px;
+            background-color: var(--panel-bg);
+            color: var(--text-secondary);
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        #thinking-select:focus {
+            border-color: var(--accent-color);
+        }
+
+        .usage-metadata {
+            margin-top: 0.4rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            display: block;
+        }
     </style>
 </head>
 
@@ -332,6 +357,7 @@
                 <span class="prompt">SET TARGET</span>
                 <select id="model-select">
                     <option value="gemini-3.5-flash">3.5f</option>
+                    <option value="gemini-3.1-flash-lite">3.1fl</option>
                     <option value="gemini-3-flash-preview">3f</option>
                     <option value="gemini-3.1-pro-preview">3.1p</option>
                 </select>
@@ -368,6 +394,7 @@
                 <div class="grounding-toggle-container">
                     <input type="checkbox" id="grounding-toggle" checked>
                     <label for="grounding-toggle">SRCH</label>
+                    <select id="thinking-select" class="hidden"></select>
                 </div>
             </div>
         </footer>
@@ -383,6 +410,86 @@
         let proxyHistory = [];    // プロキシモード時の会話履歴
         let bedrockBaseURL = null; // AWS Bedrock用のベースURL
         let bedrockHistory = [];   // AWS Bedrock用の会話履歴
+
+        const THINKING_LEVEL_SUPPORT = {
+            'gemini-3.5-flash': {
+                levels: ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'],
+                default: 'MEDIUM'
+            },
+            'gemini-3.1-pro-preview': {
+                levels: ['LOW', 'MEDIUM', 'HIGH'],
+                default: 'HIGH'
+            },
+            'gemini-3.1-flash-lite': {
+                levels: ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'],
+                default: 'MINIMAL'
+            },
+            'gemini-3.1-flash-image': {
+                levels: ['MINIMAL', 'HIGH'],
+                default: 'MINIMAL'
+            },
+            'gemini-3-flash-preview': {
+                levels: ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'],
+                default: 'HIGH'
+            },
+            'gemini-3-pro': {
+                levels: ['LOW', 'MEDIUM', 'HIGH'],
+                default: 'HIGH'
+            },
+            'gemini-3-pro-image': {
+                levels: ['HIGH'],
+                default: 'HIGH'
+            }
+        };
+
+        function updateThinkingSelectUI() {
+            const thinkingSelect = document.getElementById('thinking-select');
+            if (!thinkingSelect) return;
+
+            thinkingSelect.innerHTML = '';
+            
+            if (currentProvider === 'gemini' && THINKING_LEVEL_SUPPORT[currentModelName]) {
+                const config = THINKING_LEVEL_SUPPORT[currentModelName];
+                config.levels.forEach(level => {
+                    const opt = new Option(level, level);
+                    if (level === config.default) {
+                        opt.selected = true;
+                    }
+                    thinkingSelect.add(opt);
+                });
+                thinkingSelect.classList.remove('hidden');
+            } else {
+                thinkingSelect.classList.add('hidden');
+            }
+        }
+
+        function appendUsageMetadata(logEntry, usage) {
+            if (!usage) return;
+            const usageDiv = document.createElement('div');
+            usageDiv.className = 'usage-metadata';
+
+            let text = '';
+            if (usage.promptTokenCount !== undefined) {
+                // Gemini API 形式
+                text = `[Tokens] Input: ${usage.promptTokenCount} | Output: ${usage.candidatesTokenCount}`;
+                if (usage.thoughtsTokenCount) {
+                    text += ` (Thought: ${usage.thoughtsTokenCount})`;
+                }
+                text += ` | Total: ${usage.totalTokenCount}`;
+            } else if (usage.prompt_tokens !== undefined) {
+                // Bedrock (OpenAI互換) 形式
+                text = `[Tokens] Input: ${usage.prompt_tokens} | Output: ${usage.completion_tokens}`;
+                if (usage.completion_tokens_details?.reasoning_tokens) {
+                    text += ` (Thought: ${usage.completion_tokens_details.reasoning_tokens})`;
+                }
+                text += ` | Total: ${usage.total_tokens}`;
+            }
+            if (text) {
+                usageDiv.textContent = text;
+                logEntry.parentElement.appendChild(usageDiv);
+                logOutput.scrollTop = logOutput.scrollHeight;
+            }
+        }
 
         const setupOverlay = document.getElementById('setup-overlay');
         const mainConsole = document.getElementById('main-console');
@@ -457,6 +564,7 @@
                         // 疎通確認: proxyを通してpingに相当するリクエスト
                         const pingRes = await geminiProxyFetch('ping', false);
                         if (!pingRes) throw new Error('Proxy connection failed');
+                        updateThinkingSelectUI();
                         setupOverlay.classList.add('hidden');
                         mainConsole.classList.remove('hidden');
                         hdrModel.textContent = `Target: ${selModel} [PROXY]`;
@@ -468,6 +576,7 @@
                         model = genAI.getGenerativeModel({ model: selModel });
                         const res = await model.generateContent('ping');
                         if (res) {
+                            updateThinkingSelectUI();
                             chatSession = model.startChat({ history: [] });
                             setupOverlay.classList.add('hidden');
                             mainConsole.classList.remove('hidden');
@@ -484,8 +593,9 @@
 
                     // 疎通確認: 非ストリームで疎通テスト
                     const pingRes = await bedrockFetch('ping', false);
-                    if (!pingRes) throw new Error('Bedrock connection failed');
+                    if (!pingRes || !pingRes.text) throw new Error('Bedrock connection failed');
 
+                    updateThinkingSelectUI();
                     setupOverlay.classList.add('hidden');
                     mainConsole.classList.remove('hidden');
                     hdrModel.textContent = `Target: ${selModel} [Bedrock]`;
@@ -518,6 +628,17 @@
                 body.tools = [{ google_search: {} }];
             }
 
+            if (currentProvider === 'gemini' && THINKING_LEVEL_SUPPORT[currentModelName]) {
+                const thinkingSelect = document.getElementById('thinking-select');
+                if (thinkingSelect && thinkingSelect.value) {
+                    body.generationConfig = {
+                        thinkingConfig: {
+                            thinkingLevel: thinkingSelect.value
+                        }
+                    };
+                }
+            }
+
             const res = await fetch(url, {
                 method: 'POST',
                 headers: {
@@ -545,7 +666,7 @@
             // groundingMetadata があれば返す
             const groundingMeta = candidate?.groundingMetadata ?? null;
 
-            return { text: replyText, groundingMetadata: groundingMeta };
+            return { text: replyText, groundingMetadata: groundingMeta, usageMetadata: data.usageMetadata };
         }
 
         /**
@@ -596,7 +717,7 @@
                 bedrockHistory.push({ role: 'assistant', content: replyText });
             }
 
-            return replyText;
+            return { text: replyText, usage: data.usage };
         }
 
         /**
@@ -658,7 +779,7 @@
                     // === AWS Bedrock (OpenAI互換) モード (非ストリーミングに変更) ===
 
                     // すでに実装済みの非ストリーミング用関数 bedrockFetch を呼び出す
-                    const replyText = await retryWithBackoff(
+                    const replyResult = await retryWithBackoff(
                         async () => await bedrockFetch(text, true, useGrounding),
                         5,
                         1000
@@ -666,7 +787,10 @@
 
                     // 画面の「. . .（考え中）」を消して、AIの返答を一括表示
                     logEntry.classList.remove('thinking');
-                    logEntry.textContent = replyText;
+                    logEntry.textContent = replyResult.text;
+
+                    // トークン消費量の表示
+                    appendUsageMetadata(logEntry, replyResult.usage);
 
                     // ※履歴への追加（bedrockHistory.push）は、bedrockFetch関数の中で
                     // すでに行われているため、ここでは何もしなくてOKです（重複防止）。
@@ -683,6 +807,9 @@
                     logEntry.classList.remove('thinking');
                     logEntry.textContent = result.text;
                     logOutput.scrollTop = logOutput.scrollHeight;
+
+                    // トークン消費量の表示
+                    appendUsageMetadata(logEntry, result.usageMetadata);
 
                     // groundingMetadata の表示
                     if (result.groundingMetadata?.groundingChunks) {
@@ -710,6 +837,18 @@
                     const history = await chatSession.getHistory();
                     const modelConfig = { model: currentModelName };
                     if (useGrounding) modelConfig.tools = [{ googleSearch: {} }];
+
+                    if (currentProvider === 'gemini' && THINKING_LEVEL_SUPPORT[currentModelName]) {
+                        const thinkingSelect = document.getElementById('thinking-select');
+                        if (thinkingSelect && thinkingSelect.value) {
+                            modelConfig.generationConfig = {
+                                thinkingConfig: {
+                                    thinkingLevel: thinkingSelect.value
+                                }
+                            };
+                        }
+                    }
+
                     model = genAI.getGenerativeModel(modelConfig);
                     chatSession = model.startChat({ history });
 
@@ -733,6 +872,9 @@
                     }
                     try {
                         const response = await result.response;
+                        // トークン消費量の表示
+                        appendUsageMetadata(logEntry, response.usageMetadata);
+
                         if (response.groundingMetadata?.groundingChunks) {
                             const sourcesDiv = document.createElement('div');
                             sourcesDiv.className = 'grounding-sources';
@@ -777,6 +919,18 @@
                 const useGrounding = groundingToggle.checked;
                 const modelConfig = { model: currentModelName };
                 if (useGrounding) modelConfig.tools = [{ googleSearch: {} }];
+
+                if (currentProvider === 'gemini' && THINKING_LEVEL_SUPPORT[currentModelName]) {
+                    const thinkingSelect = document.getElementById('thinking-select');
+                    if (thinkingSelect && thinkingSelect.value) {
+                        modelConfig.generationConfig = {
+                            thinkingConfig: {
+                                thinkingLevel: thinkingSelect.value
+                            }
+                        };
+                    }
+                }
+
                 model = genAI.getGenerativeModel(modelConfig);
                 chatSession = model.startChat({ history: [] });
             }
