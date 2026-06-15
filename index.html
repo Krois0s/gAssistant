@@ -447,7 +447,7 @@
             if (!thinkingSelect) return;
 
             thinkingSelect.innerHTML = '';
-            
+
             if (currentProvider === 'gemini' && THINKING_LEVEL_SUPPORT[currentModelName]) {
                 const config = THINKING_LEVEL_SUPPORT[currentModelName];
                 config.levels.forEach(level => {
@@ -512,11 +512,13 @@
 
             if (provider === 'gemini') {
                 const opt1 = new Option('3.5f', 'gemini-3.5-flash');
-                const opt2 = new Option('3f', 'gemini-3-flash-preview');
-                const opt3 = new Option('3.1p', 'gemini-3.1-pro-preview');
+                const opt2 = new Option('3.1fl', 'gemini-3.1-flash-lite');
+                const opt3 = new Option('3f', 'gemini-3-flash-preview');
+                const opt4 = new Option('3.1p', 'gemini-3.1-pro-preview');
                 modelSelect.add(opt1);
                 modelSelect.add(opt2);
                 modelSelect.add(opt3);
+                modelSelect.add(opt4);
 
                 urlPrompt.textContent = 'SET PROXY_URL=';
                 proxyUrlInput.placeholder = '(optional) https://your-worker.workers.dev';
@@ -563,7 +565,7 @@
                         proxyHistory = [];
                         // 疎通確認: proxyを通してpingに相当するリクエスト
                         const pingRes = await geminiProxyFetch('ping', false);
-                        if (!pingRes) throw new Error('Proxy connection failed');
+                        if (!pingRes || !pingRes.text) throw new Error('Proxy connection failed');
                         updateThinkingSelectUI();
                         setupOverlay.classList.add('hidden');
                         mainConsole.classList.remove('hidden');
